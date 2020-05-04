@@ -45,17 +45,12 @@ def demo(opt):
         demo_data, batch_size=opt.batch_size,
         shuffle=False,
         num_workers=int(opt.workers),
-        collate_fn=AlignCollate_demo, pin_memory=True, drop_last=opt.map_mode)
+        collate_fn=AlignCollate_demo, pin_memory=True)
 
     # predict
     model.eval()
     with torch.no_grad():
-        for data_out in demo_loader:
-            if opt.map_mode:
-                image_tensors, labels = data_out
-                image_path_list, txt_file_list, line_number_list = map(list, zip(*labels))
-            else:
-                image_tensors, image_path_list = data_out
+        for image_tensors, labels in demo_loader:
             batch_size = image_tensors.size(0)
             image = image_tensors.to(device)
             # For max length prediction
@@ -98,30 +93,20 @@ def demo(opt):
                         print(line, end='')
                 fileinput.close()
             
-            if opt.map_mode:
-                for txt_name, line_num, pred, pred_max_prob in zip(txt_file_list, line_number_list, preds_str, preds_max_prob):
-                    if 'Attn' in opt.Prediction:
-                        pred_EOS = pred.find('[s]')
-                        pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-                        pred_max_prob = pred_max_prob[:pred_EOS]
+            for label, pred, pred_max_prob in zip(labels, preds_str, preds_max_prob):
+                if 'Attn' in opt.Prediction:
+                    pred_EOS = pred.find('[s]')
+                    pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                    pred_max_prob = pred_max_prob[:pred_EOS]
 
-                    # calculate confidence score (= multiply of pred_max_prob)
-                    confidence_score = pred_max_prob.cumprod(dim=0)[-1]
-
-                    print(f'{txt_name:25s}\t{line_num}\t{pred:25s}\t{confidence_score:0.4f}')
-                    _append_line(txt_name, line_num, f',"{pred}",{confidence_score:0.4f}')
-            else:
-                for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
-                    if 'Attn' in opt.Prediction:
-                        pred_EOS = pred.find('[s]')
-                        pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-                        pred_max_prob = pred_max_prob[:pred_EOS]
-
-                    # calculate confidence score (= multiply of pred_max_prob)
-                    confidence_score = pred_max_prob.cumprod(dim=0)[-1]
-
-                    print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
-                    log.write(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
+                # calculate confidence score (= multiply of pred_max_prob)
+                confidence_score = pred_max_prob.cumprod(dim=0)[-1]
+                if opt.map_mode:
+                    print(f'{label.txt_file:25s}\t{label.line_num}\t{pred:25s}\t{confidence_score:0.4f}')
+                    _append_line(label.txt_file, label.line_num, f',"{pred}",{confidence_score:0.4f}')
+                else:
+                    print(f'{label:25s}\t{pred:25s}\t{confidence_score:0.4f}')
+                    log.write(f'{label:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
 
             log.close()
 

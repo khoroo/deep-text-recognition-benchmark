@@ -257,8 +257,14 @@ class RawDataset(Dataset):
         return (img, self.image_path_list[index])
 
 
+class MapBox():
+    def __init__(self, map_file, line_num):
+        self.map_file = map_file
+        self.txt_file = map_file[:-3]+'txt'
+        self.line_num = line_num   
+        
 class MapDataset(IterableDataset):
-       
+    
     def __init__(self, root, opt):
         self.opt = opt
         self.file_path = glob.glob(root+'/**/*.tif', recursive = True)
@@ -331,7 +337,7 @@ class MapDataset(IterableDataset):
             boxes = self._parse_boxes_from_text(txt_file)
             for line_number,box in enumerate(boxes):
                 box_img = Image.fromarray(self._normalize_box(img_arr, box))
-                yield (box_img, (map_file, txt_file, line_number))
+                yield (box_img, MapBox(map_file, line_number))
                 
     def __iter__(self):
         return self.get_stream(self.file_path)
@@ -403,9 +409,16 @@ class AlignCollate(object):
             image_tensors = torch.cat([t.unsqueeze(0) for t in resized_images], 0)
 
         else:
-            transform = ResizeNormalize((self.imgW, self.imgH))
-            image_tensors = [transform(image) for image in images]
-            image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
+            try:
+                transform = ResizeNormalize((self.imgW, self.imgH))
+                image_tensors = [transform(image) for image in images]
+                image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
+            except:
+                print('AlignCollate err')
+                for image, label in batch:
+                    print(transform(image).size)
+                    print(label.txt_file, label.line_num)
+                raise
 
         return image_tensors, labels
 
