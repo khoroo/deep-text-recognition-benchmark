@@ -258,15 +258,16 @@ class RawDataset(Dataset):
 
 
 class MapBox():
-    def __init__(self, map_file, line_num):
+    def __init__(self, map_file, txt_file, line_num):
         self.map_file = map_file
-        self.txt_file = map_file[:-3]+'txt'
+        self.txt_file = txt_file
         self.line_num = line_num   
         
 class MapDataset(IterableDataset):
     
     def __init__(self, root, opt):
         self.opt = opt
+        self.root = root
         self.file_path = glob.glob(root+'/**/*.tif', recursive = True)
     
     def _parse_boxes_from_text(self, filename):
@@ -300,47 +301,66 @@ class MapDataset(IterableDataset):
         given by set_correct_order and (by extension) convert_polygon_to_rectangle.
 
         Parameters
-        image : Input image to extract the normalized box from
-        rect  : 4x2 array of rectangle vertices
+          image : Input image to extract the normalized box from
+          rect  : 4x2 array of rectangle vertices
         Returns
-        crop : Cropped and rotated image
+          crop : Cropped and rotated image
         """
         center = tuple(np.mean(rect,axis=0))
         vech   = rect[1] - rect[0]
         vecv   = rect[2] - rect[1]
         width  = np.linalg.norm(vech)
         height = np.linalg.norm(vecv)
-        angle  = np.rad2deg( np.arctan2(vech[1],vech[0]) )
+        angle  = np.rad2deg( np.arctan2(vech[1],vech[0]) )       
+
         # Cropped rotation adapted from https://stackoverflow.com/a/11627903 
         # by rroowwllaanndd and Suuuehgi.
         # Used under Creative Commons Attribution-Share Alike (3.0) license.
         x0 = int(center[0] - width/2)  # Cropping boundaries in rotated image
         y0 = int(center[1] - height/2)
+
         x1 = x0 + int(round(width))
         y1 = y0 + int(round(height))
+
         if x1<=0 or y1<=0 or min( [ y1-y0-1, x1-x0-1] ) < 1:
             # check whether rectangle outside the image bounds or too small    
             # rather than fail, hope someone else detects and return a dummy  image
             return np.zeros([1,1,3],dtype=np.uint8)
         if x0<0: # If the left side goes off the edge,
+            # bump the rectangle rightward (to preserve min width) or else just trim
             x0 = 0
+            
         matrix = cv2.getRotationMatrix2D(center=center, angle=angle, scale=1)
         image_rot = cv2.warpAffine(src=image, M=matrix, dsize=(x1,y1))
-        image_rot_crop = image_rot[y0:y1, x0:x1]    
+        image_rot_crop = image_rot[y0:y1, x0:x1]
+        
+        if len(image_rot_crop.shape) > 2:
+            print(image_rot_crop)
+            assert len(image_rot_crop.shape) == 2
         return image_rot_crop
     
-    def get_stream(self, file_path):
+    def _get_txt_path(self, map_path):
+        text_name = map_path.split('/')[-1][:-3]+'txt'
+        txt_path = glob.glob(self.root+'/**/'+text_name, recursive = True)[0]
+        return txt_path
+
+    def _get_stream(self, file_path):
         for map_file in file_path:
             img = Image.open(map_file).convert(mode='L')
-            txt_file = map_file[:-3]+'txt'
-            img_arr = np.array(img)
+            txt_file = self._get_txt_path(map_file)
+            img_arr = np.array(img, dtype=np.uint8)
             boxes = self._parse_boxes_from_text(txt_file)
             for line_number,box in enumerate(boxes):
-                box_img = Image.fromarray(self._normalize_box(img_arr, box))
-                yield (box_img, MapBox(map_file, line_number))
+                norm_box = self._normalize_box(img_arr, box)
+                if norm_box.sum() == 0:
+                    print('invalid image, passing')
+                    print(norm_box.shape)
+                else:
+                    box_img = Image.fromarray(norm_box,mode='L')
+                    yield (box_img, MapBox(map_file, txt_file, line_number))
                 
     def __iter__(self):
-        return self.get_stream(self.file_path)
+        return self._get_stream(self.file_path)
 
 
 class ResizeNormalize(object):
@@ -409,16 +429,9 @@ class AlignCollate(object):
             image_tensors = torch.cat([t.unsqueeze(0) for t in resized_images], 0)
 
         else:
-            try:
-                transform = ResizeNormalize((self.imgW, self.imgH))
-                image_tensors = [transform(image) for image in images]
-                image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
-            except:
-                print('AlignCollate err')
-                for image, label in batch:
-                    print(transform(image).size)
-                    print(label.txt_file, label.line_num)
-                raise
+            transform = ResizeNormalize((self.imgW, self.imgH))
+            image_tensors = [transform(image) for image in images]
+            image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
 
         return image_tensors, labels
 
