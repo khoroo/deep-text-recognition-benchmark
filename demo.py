@@ -7,7 +7,7 @@ import torch.utils.data
 import torch.nn.functional as F
 
 from utils import CTCLabelConverter, AttnLabelConverter
-from dataset import RawDataset, AlignCollate
+from dataset import RawDataset, AlignCollate, MapDataset
 from model import Model
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -34,17 +34,28 @@ def demo(opt):
 
     # prepare data. two demo images from https://github.com/bgshih/crnn#run-demo
     AlignCollate_demo = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    demo_data = RawDataset(root=opt.image_folder, opt=opt)  # use RawDataset
+    
+    if opt.map_mode:
+        demo_data = MapDataset(root=opt.image_folder, opt=opt)
+    else:
+        demo_data = RawDataset(root=opt.image_folder, opt=opt)  # use RawDataset
+    
+    
     demo_loader = torch.utils.data.DataLoader(
         demo_data, batch_size=opt.batch_size,
         shuffle=False,
         num_workers=int(opt.workers),
-        collate_fn=AlignCollate_demo, pin_memory=True)
+        collate_fn=AlignCollate_demo, pin_memory=True, drop_last=opt.map_mode)
 
     # predict
     model.eval()
     with torch.no_grad():
-        for image_tensors, image_path_list in demo_loader:
+        for data_out in demo_loader:
+            if opt.map_mode:
+                image_tensors, labels = data_out
+                image_path_list, txt_file_list, line_number_list = map(list, zip(*labels))
+            else:
+                image_tensors, image_path_list = data_out
             batch_size = image_tensors.size(0)
             image = image_tensors.to(device)
             # For max length prediction
@@ -77,17 +88,40 @@ def demo(opt):
 
             preds_prob = F.softmax(preds, dim=2)
             preds_max_prob, _ = preds_prob.max(dim=2)
-            for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
-                if 'Attn' in opt.Prediction:
-                    pred_EOS = pred.find('[s]')
-                    pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-                    pred_max_prob = pred_max_prob[:pred_EOS]
+            
+            def _append_line(fpath, line_number, string):
+                import fileinput
+                for pos,line in enumerate(fileinput.input(fpath, inplace=True)):
+                    if pos == line_number:
+                        print(line.strip('\n')+string, end='\n')
+                    else:
+                        print(line, end='')
+                fileinput.close()
+            
+            if opt.map_mode:
+                for txt_name, line_num, pred, pred_max_prob in zip(txt_file_list, line_number_list, preds_str, preds_max_prob):
+                    if 'Attn' in opt.Prediction:
+                        pred_EOS = pred.find('[s]')
+                        pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                        pred_max_prob = pred_max_prob[:pred_EOS]
 
-                # calculate confidence score (= multiply of pred_max_prob)
-                confidence_score = pred_max_prob.cumprod(dim=0)[-1]
+                    # calculate confidence score (= multiply of pred_max_prob)
+                    confidence_score = pred_max_prob.cumprod(dim=0)[-1]
 
-                print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
-                log.write(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
+                    print(f'{txt_name:25s}\t{line_num}\t{pred:25s}\t{confidence_score:0.4f}')
+                    _append_line(txt_name, line_num, f',"{pred}",{confidence_score:0.4f}')
+            else:
+                for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
+                    if 'Attn' in opt.Prediction:
+                        pred_EOS = pred.find('[s]')
+                        pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                        pred_max_prob = pred_max_prob[:pred_EOS]
+
+                    # calculate confidence score (= multiply of pred_max_prob)
+                    confidence_score = pred_max_prob.cumprod(dim=0)[-1]
+
+                    print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
+                    log.write(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
 
             log.close()
 
@@ -115,6 +149,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
+    parser.add_argument('--map_mode', action='store_true', help='map mode')
 
     opt = parser.parse_args()
 

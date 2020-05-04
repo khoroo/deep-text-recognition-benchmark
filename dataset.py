@@ -6,10 +6,14 @@ import math
 import lmdb
 import torch
 
+import glob
+import cv2
+from itertools import cycle
+
 from natsort import natsorted
 from PIL import Image
 import numpy as np
-from torch.utils.data import Dataset, ConcatDataset, Subset
+from torch.utils.data import Dataset, ConcatDataset, Subset, IterableDataset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
 
@@ -251,6 +255,86 @@ class RawDataset(Dataset):
                 img = Image.new('L', (self.opt.imgW, self.opt.imgH))
 
         return (img, self.image_path_list[index])
+
+
+class MapDataset(IterableDataset):
+       
+    def __init__(self, root, opt):
+        self.opt = opt
+        self.file_path = glob.glob(root+'/**/*.tif', recursive = True)
+    
+    def _parse_boxes_from_text(self, filename):
+        """Reads a file where each line contains the eight points of a
+        rectangle in x0,y0,x1,y1,x2,y2,x3,y3,x4,y4,x5,y5,x6,y6,x7,y7
+        format and returns the points
+
+        Parameters
+          file        : Path to the file to parse
+        Returns
+          points   : Array of box vertices from the file; shape is 4x2xN if 
+        """
+        points = list()
+        with open(filename, 'r') as fd:
+            for line in fd:
+                v = line[:-1].split(',')
+                p1 = [float(v[0]), float(v[1])]
+                p2 = [float(v[2]), float(v[3])]
+                p3 = [float(v[4]), float(v[5])]
+                p4 = [float(v[6]), float(v[7])]
+                verts = [p1, p2, p3, p4]
+                points.append(verts)
+        points = np.array(points)
+        return points
+    
+    def _normalize_box(self, image, rect):
+        """ 
+        Generate a cropped, axis-aligned version of the given rectangular box from 
+        the given image. The vertices of the rectangle must given in 
+        counter-clockwise order starting from the bottom-left (in text semantics) as
+        given by set_correct_order and (by extension) convert_polygon_to_rectangle.
+
+        Parameters
+        image : Input image to extract the normalized box from
+        rect  : 4x2 array of rectangle vertices
+        Returns
+        crop : Cropped and rotated image
+        """
+        center = tuple(np.mean(rect,axis=0))
+        vech   = rect[1] - rect[0]
+        vecv   = rect[2] - rect[1]
+        width  = np.linalg.norm(vech)
+        height = np.linalg.norm(vecv)
+        angle  = np.rad2deg( np.arctan2(vech[1],vech[0]) )
+        # Cropped rotation adapted from https://stackoverflow.com/a/11627903 
+        # by rroowwllaanndd and Suuuehgi.
+        # Used under Creative Commons Attribution-Share Alike (3.0) license.
+        x0 = int(center[0] - width/2)  # Cropping boundaries in rotated image
+        y0 = int(center[1] - height/2)
+        x1 = x0 + int(round(width))
+        y1 = y0 + int(round(height))
+        if x1<=0 or y1<=0 or min( [ y1-y0-1, x1-x0-1] ) < 1:
+            # check whether rectangle outside the image bounds or too small    
+            # rather than fail, hope someone else detects and return a dummy  image
+            return np.zeros([1,1,3],dtype=np.uint8)
+        if x0<0: # If the left side goes off the edge,
+            x0 = 0
+        matrix = cv2.getRotationMatrix2D(center=center, angle=angle, scale=1)
+        image_rot = cv2.warpAffine(src=image, M=matrix, dsize=(x1,y1))
+        image_rot_crop = image_rot[y0:y1, x0:x1]    
+        return image_rot_crop
+    
+    def get_stream(self, file_path):
+        for map_file in file_path:
+            img = Image.open(map_file).convert(mode='L')
+            txt_file = map_file[:-3]+'txt'
+            img_arr = np.array(img)
+            boxes = self._parse_boxes_from_text(txt_file)
+            for line_number,box in enumerate(boxes):
+                box_img = Image.fromarray(self._normalize_box(img_arr, box))
+                yield (box_img, (map_file, txt_file, line_number))
+                
+    def __iter__(self):
+        return self.get_stream(self.file_path)
 
 
 class ResizeNormalize(object):
