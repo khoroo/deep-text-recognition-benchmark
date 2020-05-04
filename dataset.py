@@ -268,7 +268,7 @@ class MapDataset(IterableDataset):
     def __init__(self, root, opt):
         self.opt = opt
         self.root = root
-        self.file_path = glob.glob(root+'/**/*.tif', recursive = True)
+        self.map_paths = glob.glob(root+'/**/*.tif', recursive = True)
     
     def _parse_boxes_from_text(self, filename):
         """Reads a file where each line contains the eight points of a
@@ -345,10 +345,10 @@ class MapDataset(IterableDataset):
         return txt_path
 
     def _get_stream(self, file_path):
-        for map_file in file_path:
-            img = Image.open(map_file).convert(mode='L')
-            txt_file = self._get_txt_path(map_file)
+        for map_path in map_paths:
+            img = Image.open(map_path).convert(mode='L')
             img_arr = np.array(img, dtype=np.uint8)
+            txt_file = self._get_txt_path(map_path)
             boxes = self._parse_boxes_from_text(txt_file)
             for line_number,box in enumerate(boxes):
                 norm_box = self._normalize_box(img_arr, box)
@@ -360,7 +360,7 @@ class MapDataset(IterableDataset):
                     yield (box_img, MapBox(map_file, txt_file, line_number))
                 
     def __iter__(self):
-        return self._get_stream(self.file_path)
+        return self._get_stream(self.map_paths)
 
 
 class ResizeNormalize(object):
