@@ -360,7 +360,7 @@ class MapDataset(IterableDataset):
                     yield (box_img, MapBox(map_file, txt_file, line_number))
                 
     def __iter__(self):
-        return self._get_stream(self.map_paths)
+        return self._get_stream(self.box_paths)
 
 
 class ResizeNormalize(object):
