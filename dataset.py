@@ -357,7 +357,7 @@ class MapDataset(IterableDataset):
                     print(norm_box.shape)
                 else:
                     box_img = Image.fromarray(norm_box,mode='L')
-                    yield (box_img, MapBox(map_file, txt_file, line_number))
+                    yield (box_img, MapBox(map_tile_path, box_path, line_number))
                 
     def __iter__(self):
         return self._get_stream(self.box_paths)
