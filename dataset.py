@@ -268,7 +268,7 @@ class MapDataset(IterableDataset):
     def __init__(self, root, opt):
         self.opt = opt
         self.root = root
-        self.map_paths = glob.glob(root+'/**/*.tif', recursive = True)
+        self.box_paths = glob.glob(root+'/**/*.txt', recursive = True)
     
     def _parse_boxes_from_text(self, filename):
         """Reads a file where each line contains the eight points of a
@@ -339,17 +339,17 @@ class MapDataset(IterableDataset):
             assert len(image_rot_crop.shape) == 2
         return image_rot_crop
     
-    def _get_txt_path(self, map_path):
-        text_name = map_path.split('/')[-1][:-3]+'txt'
-        txt_path = glob.glob(self.root+'/**/'+text_name, recursive = True)[0]
-        return txt_path
+    def _get_map_tile_path(self, box_path):
+        map_tile_name = box_path.split('/')[-1][:-3]+'tif'
+        map_tile_path = glob.glob(self.root+'/**/'+map_tile_name, recursive = True)[0]
+        return map_tile_path
 
-    def _get_stream(self, file_path):
-        for map_path in map_paths:
-            img = Image.open(map_path).convert(mode='L')
+    def _get_stream(self, box_paths):
+        for box_path in box_paths:
+            map_tile_path = self._get_map_tile_path(box_path)
+            img = Image.open(map_tile_path).convert(mode='L')
             img_arr = np.array(img, dtype=np.uint8)
-            txt_file = self._get_txt_path(map_path)
-            boxes = self._parse_boxes_from_text(txt_file)
+            boxes = self._parse_boxes_from_text(box_path)
             for line_number,box in enumerate(boxes):
                 norm_box = self._normalize_box(img_arr, box)
                 if norm_box.sum() == 0:
