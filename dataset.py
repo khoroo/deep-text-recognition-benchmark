@@ -340,7 +340,7 @@ class MapDataset(IterableDataset):
         return image_rot_crop
     
     def _get_map_tile_path(self, box_path):
-        map_tile_name = box_path.split('/')[-1][:-3]+'tif'
+        map_tile_name = box_path.split('/')[-1][:-3]+self.opt.map_ext
         map_tile_path = glob.glob(self.root+'/**/'+map_tile_name, recursive = True)[0]
         return map_tile_path
 

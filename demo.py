@@ -135,6 +135,7 @@ if __name__ == '__main__':
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
     parser.add_argument('--map_mode', action='store_true', help='map mode')
+    parser.add_argument('--map_ext', type=str, default='tif', help='File extension of map tile images')
 
     opt = parser.parse_args()
 
