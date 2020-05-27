@@ -12,6 +12,7 @@ from itertools import cycle
 
 from natsort import natsorted
 from PIL import Image
+Image.MAX_IMAGE_PIXELS = 2**32
 import numpy as np
 from torch.utils.data import Dataset, ConcatDataset, Subset, IterableDataset
 from torch._utils import _accumulate
